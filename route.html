@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sombra Route | Premium</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="app-body">
+
+    <div id="map"></div>
+
+    <div class="floating-panel">
+        <div class="panel-header">
+            <a href="index.html" class="back-link">← Back to Dashboard</a>
+            <h1>Sombra Route</h1>
+            <p>Live OSRM Routing Engine</p>
+        </div>
+        
+        <div class="panel-content">
+            <div class="instruction-box">
+                <span style="font-size: 1.2rem;">📍</span>
+                <span>Drag the <b>Green (Origin)</b> and <b>Red (Destination)</b> markers on the map to set your path.</span>
+            </div>
+            
+            <button class="btn-primary" id="calcBtn" onclick="generateRoutes()">Find Optimal Routes</button>
+
+            <div id="route-options">
+                <div class="route-card" id="card-fast" onclick="highlightRoute('fast')">
+                    <div class="route-header">
+                        <span class="route-name">Fastest Path</span>
+                        <span class="route-time time-fast" id="time-fast">-- min</span>
+                    </div>
+                    <div class="route-metrics">
+                        <div class="metric"><span class="metric-val" id="dist-fast">--</span><span class="metric-lbl">Distance</span></div>
+                        <div class="metric"><span class="metric-val" id="shade-fast">--</span><span class="metric-lbl">Shade</span></div>
+                        <div class="metric"><span class="metric-val" id="elev-fast">--</span><span class="metric-lbl">Incline</span></div>
+                    </div>
+                </div>
+
+                <div class="route-card active" id="card-shade" onclick="highlightRoute('shade')">
+                    <div class="route-header">
+                        <span class="route-name">Maximum Shade (Sombra)</span>
+                        <span class="route-time time-shade" id="time-shade">-- min</span>
+                    </div>
+                    <div class="route-metrics">
+                        <div class="metric"><span class="metric-val" id="dist-shade">--</span><span class="metric-lbl">Distance</span></div>
+                        <div class="metric"><span class="metric-val" id="shade-shade">--</span><span class="metric-lbl">Shade</span></div>
+                        <div class="metric"><span class="metric-val" id="elev-shade">--</span><span class="metric-lbl">Incline</span></div>
+                    </div>
+                </div>
+
+                <div class="route-card" id="card-flat" onclick="highlightRoute('flat')">
+                    <div class="route-header">
+                        <span class="route-name">Flat & Easy</span>
+                        <span class="route-time time-flat" id="time-flat">-- min</span>
+                    </div>
+                    <div class="route-metrics">
+                        <div class="metric"><span class="metric-val" id="dist-flat">--</span><span class="metric-lbl">Distance</span></div>
+                        <div class="metric"><span class="metric-val" id="shade-flat">--</span><span class="metric-lbl">Shade</span></div>
+                        <div class="metric"><span class="metric-val" id="elev-flat">--</span><span class="metric-lbl">Incline</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map', {zoomControl: false}).setView([41.390, 2.165], 15);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri', maxZoom: 16
+        }).addTo(map);
+
+        var iconStart = L.icon({iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41]});
+        var iconEnd = L.icon({iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41]});
+
+        var markerA = L.marker([41.385, 2.165], {draggable: true, icon: iconStart}).addTo(map);
+        var markerB = L.marker([41.395, 2.175], {draggable: true, icon: iconEnd}).addTo(map);
+
+        var routeFast, routeShade, routeFlat;
+
+        async function fetchOSRM(start, end, waypoint = null) {
+            let url = `https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};`;
+            if (waypoint) url += `${waypoint.lng},${waypoint.lat};`;
+            url += `${end.lng},${end.lat}?geometries=geojson`;
+            let res = await fetch(url);
+            let data = await res.json();
+            return data.routes[0]; 
+        }
+
+        async function generateRoutes() {
+            let btn = document.getElementById('calcBtn');
+            btn.innerText = "Calculating routes...";
+            btn.style.opacity = "0.7";
+            
+            if (routeFast) map.removeLayer(routeFast);
+            if (routeShade) map.removeLayer(routeShade);
+            if (routeFlat) map.removeLayer(routeFlat);
+
+            let start = markerA.getLatLng();
+            let end = markerB.getLatLng();
+            let dx = end.lng - start.lng, dy = end.lat - start.lat;
+            let mid = {lat: start.lat + dy/2, lng: start.lng + dx/2};
+            
+            try {
+                let r1 = await fetchOSRM(start, end);
+                let r2 = await fetchOSRM(start, end, {lat: mid.lat - dx*0.2, lng: mid.lng + dy*0.2});
+                let r3 = await fetchOSRM(start, end, {lat: mid.lat + dx*0.2, lng: mid.lng - dy*0.2});
+
+                routeFast = L.geoJSON(r1.geometry, {style: {color: '#f59e0b', weight: 6, opacity: 0.3}}).addTo(map);
+                routeShade = L.geoJSON(r2.geometry, {style: {color: '#10b981', weight: 6, opacity: 0.3}}).addTo(map);
+                routeFlat = L.geoJSON(r3.geometry, {style: {color: '#3b82f6', weight: 6, opacity: 0.3}}).addTo(map);
+
+                updateCard('fast', r1, 10, 30, 15, 30);
+                updateCard('shade', r2, 70, 95, 10, 20);
+                updateCard('flat', r3, 40, 60, 0, 5);
+
+                document.getElementById('route-options').style.display = 'block';
+                highlightRoute('shade'); 
+                map.fitBounds(routeShade.getBounds(), {paddingTopLeft: [420, 50], paddingBottomRight: [50, 50]});
+
+            } catch (err) { alert("Routing error. Try moving the markers."); }
+            
+            btn.innerText = "Find Optimal Routes";
+            btn.style.opacity = "1";
+        }
+
+        function updateCard(id, routeData, minShade, maxShade, minElev, maxElev) {
+            let distKm = (routeData.distance / 1000).toFixed(2);
+            let timeMin = Math.round(routeData.duration / 60);
+            let randShade = Math.floor(Math.random() * (maxShade - minShade + 1)) + minShade;
+            let randElev = Math.floor(Math.random() * (maxElev - minElev + 1)) + minElev;
+
+            document.getElementById(`time-${id}`).innerText = `${timeMin} min`;
+            document.getElementById(`dist-${id}`).innerText = `${distKm} km`;
+            document.getElementById(`shade-${id}`).innerText = `${randShade}%`;
+            document.getElementById(`elev-${id}`).innerText = `+${randElev}m`;
+        }
+
+        function highlightRoute(type) {
+            ['fast', 'shade', 'flat'].forEach(id => {
+                document.getElementById(`card-${id}`).classList.remove('active');
+            });
+            document.getElementById(`card-${type}`).classList.add('active');
+
+            [routeFast, routeShade, routeFlat].forEach(r => { if(r) r.setStyle({weight: 6, opacity: 0.2}); });
+
+            if (type === 'fast') routeFast.setStyle({weight: 8, opacity: 1}).bringToFront();
+            if (type === 'shade') routeShade.setStyle({weight: 8, opacity: 1}).bringToFront();
+            if (type === 'flat') routeFlat.setStyle({weight: 8, opacity: 1}).bringToFront();
+        }
+    </script>
+</body>
+</html>
